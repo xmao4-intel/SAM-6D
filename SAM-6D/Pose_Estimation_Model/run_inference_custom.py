@@ -1,4 +1,5 @@
-import gorilla
+import yaml
+from types import SimpleNamespace
 import argparse
 import os
 import sys
@@ -58,13 +59,26 @@ def get_parser():
 
     return args_cfg
 
+
+
+def load_config(path: str) -> SimpleNamespace:
+    """Convert yaml to SimpleNamespace."""
+    with open(path, 'r', encoding='utf-8') as f:
+        raw = yaml.safe_load(f)
+    # Recursively convert dicts to SimpleNamespace
+    def to_ns(obj):
+        if isinstance(obj, dict):
+            return SimpleNamespace(**{k: to_ns(v) for k, v in obj.items()})
+        return obj
+    return to_ns(raw)
+
 def init():
     args = get_parser()
     exp_name = args.model + '_' + \
         osp.splitext(args.config.split("/")[-1])[0] + '_id' + str(args.exp_id)
     log_dir = osp.join("log", exp_name)
 
-    cfg = gorilla.Config.fromfile(args.config)
+    cfg = load_config(args.config)
     cfg.exp_name = exp_name
     cfg.gpus     = args.gpus
     cfg.model_name = args.model
@@ -79,7 +93,11 @@ def init():
     cfg.seg_path = args.seg_path
 
     cfg.det_score_thresh = args.det_score_thresh
-    gorilla.utils.set_cuda_visible_devices(gpu_ids = cfg.gpus)
+    # Remove CUDA device setting for CPU-only
+    if not torch.cuda.is_available() or str(cfg.gpus).lower() == "cpu":
+        cfg.gpus = "cpu"
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.gpus)
 
     return  cfg
 
@@ -253,6 +271,44 @@ def get_test_data(rgb_path, depth_path, cam_path, cad_path, seg_path, det_score_
     return ret_dict, whole_image, whole_pts.reshape(-1, 3), model_points, all_dets
 
 
+def load_checkpoint(model, filename,
+                   optimizer=None,
+                   scheduler=None,
+                   map_location='cpu',
+                   strict=True):
+    """ Load checkpoint from filename """
+    print(f'=> loading checkpoint {filename} ...')
+
+    # Load checkpoint
+    if not os.path.isfile(filename):
+        raise FileNotFoundError(f'No checkpoint found at {filename}')
+
+    ckpt = torch.load(filename, map_location=map_location)
+
+    # 1. model weights
+    if 'model_state_dict' in ckpt:
+        model_state = ckpt['model_state_dict']
+    elif 'state_dict' in ckpt:
+        model_state = ckpt['state_dict']
+    elif 'model' in ckpt and isinstance(ckpt['model'], dict):
+        model_state = ckpt['model']
+    else:
+        model_state = ckpt
+    new_state = {k[7:] if k.startswith('module.') else k: v
+                for k, v in model_state.items()}
+    model.load_state_dict(new_state, strict=strict)
+
+    # 2. optimizer
+    if optimizer is not None and 'optimizer_state_dict' in ckpt:
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+
+    # 3. scheduler
+    if scheduler is not None and 'scheduler_state_dict' in ckpt:
+        scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+
+    # 4. epoch and other infos
+    return {'epoch': ckpt.get('epoch', -1),
+           'meta': ckpt.get('meta', {})}
 
 if __name__ == "__main__":
     cfg = init()
@@ -264,10 +320,14 @@ if __name__ == "__main__":
     print("=> creating model ...")
     MODEL = importlib.import_module(cfg.model_name)
     model = MODEL.Net(cfg.model)
-    model = model.cuda()
     model.eval()
+    
     checkpoint = os.path.join(os.path.dirname((os.path.abspath(__file__))), 'checkpoints', 'sam-6d-pem-base.pth')
-    gorilla.solver.load_checkpoint(model=model, filename=checkpoint)
+    if torch.cuda.is_available() and str(cfg.gpus) != "cpu":
+        model = model.cuda()
+        load_checkpoint(model=model, filename=checkpoint, map_location='cuda')
+    else:
+        load_checkpoint(model=model, filename=checkpoint)
 
     print("=> extracting templates ...")
     tem_path = os.path.join(cfg.output_dir, 'templates')
