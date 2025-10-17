@@ -350,7 +350,7 @@ def weighted_procrustes(
     t = t.squeeze(2)
 
     if return_transform:
-        transform = torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1).cuda()
+        transform = torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1).to(src_points.device)
         transform[:, :3, :3] = R
         transform[:, :3, 3] = t
         if squeeze_first:

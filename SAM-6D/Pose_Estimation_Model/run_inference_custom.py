@@ -164,7 +164,7 @@ def _get_template(path, cfg, tem_index=1):
     return rgb, rgb_choose, xyz
 
 
-def get_templates(path, cfg):
+def get_templates(path, cfg, use_cuda):
     n_template_view = cfg.n_template_view
     all_tem = []
     all_tem_choose = []
@@ -174,13 +174,20 @@ def get_templates(path, cfg):
     for v in range(n_template_view):
         i = int(total_nView / n_template_view * v)
         tem, tem_choose, tem_pts = _get_template(path, cfg, i)
-        all_tem.append(torch.FloatTensor(tem).unsqueeze(0).cuda())
-        all_tem_choose.append(torch.IntTensor(tem_choose).long().unsqueeze(0).cuda())
-        all_tem_pts.append(torch.FloatTensor(tem_pts).unsqueeze(0).cuda())
+        t = torch.FloatTensor(tem).unsqueeze(0)
+        tc = torch.IntTensor(tem_choose).long().unsqueeze(0)
+        tp = torch.FloatTensor(tem_pts).unsqueeze(0)
+        if use_cuda:
+            t = t.cuda()
+            tc = tc.cuda()
+            tp = tp.cuda()
+        all_tem.append(t)
+        all_tem_choose.append(tc)
+        all_tem_pts.append(tp)
     return all_tem, all_tem_pts, all_tem_choose
 
 
-def get_test_data(rgb_path, depth_path, cam_path, cad_path, seg_path, det_score_thresh, cfg):
+def get_test_data(rgb_path, depth_path, cam_path, cad_path, seg_path, det_score_thresh, cfg, use_cuda):
     dets = []
     with open(seg_path) as f:
         dets_ = json.load(f) # keys: scene_id, image_id, category_id, bbox, score, segmentation
@@ -260,14 +267,22 @@ def get_test_data(rgb_path, depth_path, cam_path, cad_path, seg_path, det_score_
         all_dets.append(inst)
 
     ret_dict = {}
-    ret_dict['pts'] = torch.stack(all_cloud).cuda()
-    ret_dict['rgb'] = torch.stack(all_rgb).cuda()
-    ret_dict['rgb_choose'] = torch.stack(all_rgb_choose).cuda()
-    ret_dict['score'] = torch.FloatTensor(all_score).cuda()
+    ret_dict['pts'] = torch.stack(all_cloud)
+    ret_dict['rgb'] = torch.stack(all_rgb)
+    ret_dict['rgb_choose'] = torch.stack(all_rgb_choose)
+    ret_dict['score'] = torch.FloatTensor(all_score)
+    if use_cuda:
+        ret_dict['pts'] = ret_dict['pts'].cuda()
+        ret_dict['rgb'] = ret_dict['rgb'].cuda()
+        ret_dict['rgb_choose'] = ret_dict['rgb_choose'].cuda()
+        ret_dict['score'] = ret_dict['score'].cuda()
 
     ninstance = ret_dict['pts'].size(0)
-    ret_dict['model'] = torch.FloatTensor(model_points).unsqueeze(0).repeat(ninstance, 1, 1).cuda()
-    ret_dict['K'] = torch.FloatTensor(K).unsqueeze(0).repeat(ninstance, 1, 1).cuda()
+    ret_dict['model'] = torch.FloatTensor(model_points).unsqueeze(0).repeat(ninstance, 1, 1)
+    ret_dict['K'] = torch.FloatTensor(K).unsqueeze(0).repeat(ninstance, 1, 1)
+    if use_cuda:
+        ret_dict['model'] = ret_dict['model'].cuda()
+        ret_dict['K'] = ret_dict['K'].cuda()
     return ret_dict, whole_image, whole_pts.reshape(-1, 3), model_points, all_dets
 
 
@@ -323,7 +338,8 @@ if __name__ == "__main__":
     model.eval()
     
     checkpoint = os.path.join(os.path.dirname((os.path.abspath(__file__))), 'checkpoints', 'sam-6d-pem-base.pth')
-    if torch.cuda.is_available() and str(cfg.gpus) != "cpu":
+    use_cuda = torch.cuda.is_available() and str(cfg.gpus) != "cpu"
+    if use_cuda:
         model = model.cuda()
         load_checkpoint(model=model, filename=checkpoint, map_location='cuda')
     else:
@@ -331,14 +347,15 @@ if __name__ == "__main__":
 
     print("=> extracting templates ...")
     tem_path = os.path.join(cfg.output_dir, 'templates')
-    all_tem, all_tem_pts, all_tem_choose = get_templates(tem_path, cfg.test_dataset)
+    all_tem, all_tem_pts, all_tem_choose = get_templates(tem_path, cfg.test_dataset, use_cuda)
     with torch.no_grad():
         all_tem_pts, all_tem_feat = model.feature_extraction.get_obj_feats(all_tem, all_tem_pts, all_tem_choose)
 
     print("=> loading input data ...")
     input_data, img, whole_pts, model_points, detections = get_test_data(
         cfg.rgb_path, cfg.depth_path, cfg.cam_path, cfg.cad_path, cfg.seg_path, 
-        cfg.det_score_thresh, cfg.test_dataset
+        cfg.det_score_thresh, cfg.test_dataset,
+        use_cuda
     )
     ninstance = input_data['pts'].size(0)
     
