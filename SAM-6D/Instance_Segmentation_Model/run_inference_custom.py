@@ -109,7 +109,7 @@ def run_inference(segmentor_model, output_dir, cad_path, rgb_path, depth_path, c
     logging.info("Initializing model")
     model = instantiate(cfg.model)
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("xpu" if torch.xpu.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
     model.descriptor_model.model = model.descriptor_model.model.to(device)
     model.descriptor_model.model.device = device
     # if there is predictor in the model, move it to device
