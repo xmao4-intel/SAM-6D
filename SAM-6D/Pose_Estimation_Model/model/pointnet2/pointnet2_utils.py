@@ -17,20 +17,25 @@ import torch.nn as nn
 import pytorch_utils as pt_utils
 import sys
 
-try:
-    import builtins
-except:
-    import __builtin__ as builtins
+import os
+use_cuda_ext = os.environ.get('USE_POINTNET2_CUDA_EXT', 'False').lower() in ('true', '1', 'yes')
+if use_cuda_ext and torch.cuda.is_available():
+    try:
+        import builtins
+    except:
+        import __builtin__ as builtins
 
-try:
-    import pointnet2._ext as _ext
-except ImportError:
-    if not getattr(builtins, "__POINTNET2_SETUP__", False):
-        raise ImportError(
-            "Could not import _ext module.\n"
-            "Please see the setup instructions in the README: "
-            "https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/README.rst"
-        )
+    try:
+        import pointnet2._ext as _ext
+    except ImportError:
+        if not getattr(builtins, "__POINTNET2_SETUP__", False):
+            raise ImportError(
+                "Could not import _ext module.\n"
+                "Please see the setup instructions in the README: "
+                "https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/README.rst"
+            )
+else:
+    import pointnet2_ops_torch as _ext
 
 if False:
     # Workaround for type hints without depending on the `typing` module
