@@ -7,6 +7,7 @@ This guide explains how to set up a Python virtual environment for SAM-6D using 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+souce /opt/intel/oneapi/setvars.sh # for xpu
 ```
 
 ## 2. Install Dependencies
@@ -49,6 +50,5 @@ sh pem.sh
 ```
 
 ## Notes
-- For GPU support, ensure your Python and pip environment matches your CUDA version.
 - If you encounter issues, check the `requirements.txt` for package versions.
 - For advanced usage (training, evaluation), see the main `README.md` and submodule READMEs.
